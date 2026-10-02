@@ -1,335 +1,254 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import "./App.css";
 
-const API_URL = import.meta.env.VITE_API_URL;
-function App() {
+import Header from "./components/Header";
+import StatCard from "./components/StatCard";
+import TrafficChart from "./components/TrafficChart";
+import ProtocolDistribution from "./components/ProtocolDistribution";
+import DetectionPanel from "./components/DetectionPanel";
+import AlertsTable from "./components/AlertsTable";
+import ModelInfo from "./components/ModelInfo";
+
+// Preserve existing backend API URL resolution with resilient local fallback
+const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+export function App() {
   const [backendStatus, setBackendStatus] = useState("CHECKING");
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const [prediction, setPrediction] = useState(null);
-  const [predictionLoading, setPredictionLoading] = useState(false);
-
-  const [predictionHistory, setPredictionHistory] = useState([]);
-
-  const [dashboardStats, setDashboardStats] = useState({
-    total_flows: 0,
-    benign_flows: 0,
-    anomaly_flows: 0,
+  // Model & System State
+  const [modelInfo, setModelInfo] = useState({
+    model: "Random Forest",
+    status: "loaded",
+    features: 77,
+    feature_names: []
   });
 
-  useEffect(() => {
-    fetch(`${API_URL}/health`)
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "online") {
-          setBackendStatus("ONLINE");
-        } else {
-          setBackendStatus("OFFLINE");
-        }
-      })
-      .catch(() => {
+  const [dashboardStats, setDashboardStats] = useState({
+    total_flows: 2520798,
+    benign_flows: 2095057,
+    anomaly_flows: 425741,
+    model: "Random Forest",
+    model_status: "loaded"
+  });
+
+  // Inference & Detection Console State
+  const [prediction, setPrediction] = useState(null);
+  const [predictionLoading, setPredictionLoading] = useState(false);
+  const [predictionError, setPredictionError] = useState(null);
+  const [lastSampleData, setLastSampleData] = useState(null);
+
+  // Real-time classification event history
+  const [liveEvents, setLiveEvents] = useState([]);
+
+  // Fetch health status
+  const fetchHealth = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/health`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.status === "online") {
+        setBackendStatus("ONLINE");
+      } else {
         setBackendStatus("OFFLINE");
-      });
+      }
+    } catch {
+      setBackendStatus("OFFLINE");
+    }
   }, []);
 
+  // Fetch dataset statistics
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/stats`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setDashboardStats(data);
+    } catch (err) {
+      console.warn("Could not load /stats from backend:", err);
+    }
+  }, []);
+
+  // Fetch model specifications
+  const fetchModelInfo = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/model-info`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setModelInfo(data);
+    } catch (err) {
+      console.warn("Could not load /model-info from backend:", err);
+    }
+  }, []);
+
+  // Initial data loading
   useEffect(() => {
-    fetch(`${API_URL}/stats`)
-      .then((response) => response.json())
-      .then((data) => {
-        setDashboardStats(data);
-      })
-      .catch((error) => {
-        console.error("Failed to load statistics:", error);
-      });
-  }, []);
+    fetchHealth();
+    fetchStats();
+    fetchModelInfo();
+  }, [fetchHealth, fetchStats, fetchModelInfo]);
 
-  const stats = [
-    {
-      title: "Total Flows",
-      value: dashboardStats.total_flows.toLocaleString(),
-      subtitle: "Captured traffic flows",
-    },
-    {
-      title: "Anomalies",
-      value: dashboardStats.anomaly_flows.toLocaleString(),
-      subtitle: "Suspicious flows detected",
-    },
-    {
-      title: "Benign Traffic",
-      value: dashboardStats.benign_flows.toLocaleString(),
-      subtitle: "Normal flows",
-    },
-    {
-      title: "Detection Rate",
-      value: "99.6%",
-      subtitle: "Current model performance",
-    },
-  ];
+  // Periodic heartbeat poll
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchHealth();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [fetchHealth]);
 
-  const alerts = [
+  // Manual refresh trigger
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await Promise.all([fetchHealth(), fetchStats(), fetchModelInfo()]);
+    setTimeout(() => setIsRefreshing(false), 500);
+  };
 
-  ];
-
-  const testTraffic = async (sampleType) => {
+  // Execute single-flow detection test
+  const handleTestTraffic = async (sampleType) => {
     try {
       setPredictionLoading(true);
-      setPrediction(null);
+      setPredictionError(null);
 
-      // Get a demo traffic sample
-      const sampleResponse = await fetch(
-        `${API_URL}/sample/${sampleType}`
-      );
-
+      // 1. Fetch demo sample vector from backend
+      const sampleResponse = await fetch(`${API_URL}/sample/${sampleType}`);
+      if (!sampleResponse.ok) {
+        throw new Error(`Failed to retrieve sample vector (${sampleResponse.status} ${sampleResponse.statusText})`);
+      }
       const sampleData = await sampleResponse.json();
 
-      // Send the 77 features to the ML prediction endpoint
-      const predictionResponse = await fetch(
-        `${API_URL}/predict`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(sampleData.features),
-        }
-      );
+      if (sampleData.error) {
+        throw new Error(sampleData.error);
+      }
+
+      setLastSampleData(sampleData.features);
+
+      // 2. Submit extracted features to model prediction endpoint
+      const predictionResponse = await fetch(`${API_URL}/predict`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(sampleData.features),
+      });
+
+      if (!predictionResponse.ok) {
+        throw new Error(`Inference engine rejected request (${predictionResponse.status} ${predictionResponse.statusText})`);
+      }
 
       const result = await predictionResponse.json();
 
-      setPrediction(result);
-      setPredictionHistory((previous) => [
-        {
-          time: new Date().toLocaleTimeString(),
-          type: result.label,
-          sample: sampleType,
-          confidence: result.confidence,
-        },
-        ...previous,
-      ]);
-    }
-    catch (error) {
-      console.error("Prediction failed:", error);
-      setPrediction({
-        error: "Prediction request failed",
-      });
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      const enrichedResult = {
+        ...result,
+        sample_type: sampleType
+      };
+
+      setPrediction(enrichedResult);
+
+      // 3. Prepend security event to live audit log
+      const newEvent = {
+        id: `live-${Date.now()}`,
+        time: new Date().toTimeString().slice(0, 8),
+        type: enrichedResult.label,
+        source: `Live Demo: ${sampleType.toUpperCase()} Vector`,
+        severity: enrichedResult.label === "ANOMALY" ? "CRITICAL" : "LOW",
+        status: enrichedResult.label === "ANOMALY" ? "Detected" : "Normal",
+        confidence: enrichedResult.confidence,
+      };
+
+      setLiveEvents((prev) => [newEvent, ...prev]);
+    } catch (err) {
+      console.error("Prediction routine failed:", err);
+      setPredictionError(err.message || "Connection to inference endpoint failed.");
     } finally {
       setPredictionLoading(false);
     }
   };
 
+  // Derive metric ratios
+  const totalFlowsCount = dashboardStats.total_flows || 2520798;
+  const benignRatio = totalFlowsCount > 0 
+    ? ((dashboardStats.benign_flows / totalFlowsCount) * 100).toFixed(1)
+    : "83.1";
+  const anomalyRatio = totalFlowsCount > 0 
+    ? ((dashboardStats.anomaly_flows / totalFlowsCount) * 100).toFixed(1)
+    : "16.9";
+
   return (
-    <div className="app">
-      <header className="header">
-        <div>
-          <h1>Network Traffic Monitor</h1>
-          <p>Network Anomaly Detection Platform</p>
-        </div>
+    <div className="soc-app">
+      {/* Top Header */}
+      <Header
+        backendStatus={backendStatus}
+        modelInfo={modelInfo}
+        onRefresh={handleRefresh}
+        isRefreshing={isRefreshing}
+      />
 
-        <div className="status">
-          <span
-            className={`status-dot ${backendStatus === "ONLINE" ? "online" : "offline"
-              }`}
-          ></span>
+      {/* Main Operations Dashboard */}
+      <main className="soc-dashboard">
+        {/* Section 1: Overview Metrics */}
+        <section className="soc-stats-grid" aria-label="Operational Metrics">
+          <StatCard
+            title="Total Evaluated Flows"
+            value={totalFlowsCount.toLocaleString()}
+            subtitle="CICIDS2017 Benchmark Dataset"
+            detailBadge="100% CAPTURE"
+            tone="default"
+          />
 
-          Backend {backendStatus}
-        </div>
-      </header>
+          <StatCard
+            title="Benign Baseline"
+            value={dashboardStats.benign_flows.toLocaleString()}
+            subtitle={`${benignRatio}% of total traffic volume`}
+            detailBadge="NORMAL"
+            tone="green"
+          />
 
-      <main className="dashboard">
-        <section className="stats-grid">
-          {stats.map((stat) => (
-            <div className="stat-card" key={stat.title}>
-              <h3>{stat.title}</h3>
-              <div className="stat-value">{stat.value}</div>
-              <p>{stat.subtitle}</p>
-            </div>
-          ))}
+          <StatCard
+            title="Intrusion Anomalies"
+            value={dashboardStats.anomaly_flows.toLocaleString()}
+            subtitle={`${anomalyRatio}% malicious attack vectors`}
+            detailBadge="THREATS"
+            tone="red"
+          />
+
+          <StatCard
+            title="Model Validation Rate"
+            value="99.6%"
+            subtitle="Random Forest Test Accuracy"
+            detailBadge="BALANCED"
+            tone="blue"
+          />
         </section>
 
-        <section className="content-grid">
-          <div className="panel traffic-panel">
-            <div className="panel-header">
-              <div>
-                <h2>Traffic Activity</h2>
-                <p>Network flows over time</p>
-              </div>
-              <span className="live-badge">LIVE</span>
-            </div>
-
-            <div className="chart-placeholder">
-              <div className="chart-line"></div>
-              <div className="chart-labels">
-                <span>10:00</span>
-                <span>10:30</span>
-                <span>11:00</span>
-                <span>11:30</span>
-                <span>12:00</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-header">
-              <div>
-                <h2>Protocol Distribution</h2>
-                <p>Current traffic breakdown</p>
-              </div>
-            </div>
-
-            <div className="protocol-list">
-              <div className="protocol">
-                <div>
-                  <span>TCP</span>
-                  <strong>68%</strong>
-                </div>
-                <div className="progress">
-                  <div className="progress-fill tcp"></div>
-                </div>
-              </div>
-
-              <div className="protocol">
-                <div>
-                  <span>UDP</span>
-                  <strong>21%</strong>
-                </div>
-                <div className="progress">
-                  <div className="progress-fill udp"></div>
-                </div>
-              </div>
-
-              <div className="protocol">
-                <div>
-                  <span>ICMP</span>
-                  <strong>7%</strong>
-                </div>
-                <div className="progress">
-                  <div className="progress-fill icmp"></div>
-                </div>
-              </div>
-
-              <div className="protocol">
-                <div>
-                  <span>Other</span>
-                  <strong>4%</strong>
-                </div>
-                <div className="progress">
-                  <div className="progress-fill other"></div>
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* Section 2 & 3: Traffic Monitoring & Composition */}
+        <section className="soc-main-grid">
+          <TrafficChart />
+          <ProtocolDistribution totalFlows={totalFlowsCount} />
         </section>
 
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h2>Recent Security Alerts</h2>
-              <p>Latest traffic classifications</p>
-            </div>
-          </div>
-
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Detection</th>
-                  <th>Source</th>
-                  <th>Severity</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {predictionHistory.length === 0 ? (
-                  <tr>
-                    <td colSpan="5" style={{ textAlign: "center" }}>
-                      No predictions yet
-                    </td>
-                  </tr>
-                ) : (
-                  predictionHistory.map((item, index) => (
-                    <tr key={index}>
-                      <td>{item.time}</td>
-
-                      <td>{item.type}</td>
-
-                      <td>
-                        Demo {item.sample}
-                      </td>
-
-                      <td>
-                        <span
-                          className={`severity ${item.type === "ANOMALY" ? "high" : "low"
-                            }`}
-                        >
-                          {item.type === "ANOMALY" ? "High" : "Low"}
-                        </span>
-                      </td>
-
-                      <td>
-                        {item.type === "ANOMALY"
-                          ? `Detected (${(item.confidence * 100).toFixed(1)}%)`
-                          : `Benign (${(item.confidence * 100).toFixed(1)}%)`}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+        {/* Section 4: Detection Console */}
+        <section>
+          <DetectionPanel
+            onTestTraffic={handleTestTraffic}
+            prediction={prediction}
+            isLoading={predictionLoading}
+            error={predictionError}
+            lastSampleData={lastSampleData}
+          />
         </section>
 
-        <section className="panel detection-panel">
-          <div className="panel-header">
-            <div>
-              <h2>Traffic Detection</h2>
-              <p>Test the Random Forest anomaly detection model</p>
-            </div>
-          </div>
+        {/* Section 5: Security Alerts & Incident Log */}
+        <section>
+          <AlertsTable liveEvents={liveEvents} />
+        </section>
 
-          <div className="detection-controls">
-            <button
-              onClick={() => testTraffic("benign")}
-              disabled={predictionLoading}
-            >
-              Test Benign Traffic
-            </button>
-
-            <button
-              onClick={() => testTraffic("anomaly")}
-              disabled={predictionLoading}
-            >
-              Test Anomaly Traffic
-            </button>
-          </div>
-
-          {predictionLoading && (
-            <div className="prediction-result">
-              <h3>Analyzing traffic...</h3>
-            </div>
-          )}
-
-          {prediction && !predictionLoading && (
-            <div className="prediction-result">
-              {prediction.error ? (
-                <h3>{prediction.error}</h3>
-              ) : (
-                <>
-                  <h3>
-                    Prediction:{" "}
-                    <strong>{prediction.label}</strong>
-                  </h3>
-
-                  <p>
-                    Confidence:{" "}
-                    <strong>
-                      {(prediction.confidence * 100).toFixed(1)}%
-                    </strong>
-                  </p>
-                </>
-              )}
-            </div>
-          )}
+        {/* Section 6: Model Architecture & Telemetry */}
+        <section>
+          <ModelInfo modelInfo={modelInfo} stats={dashboardStats} />
         </section>
       </main>
     </div>
