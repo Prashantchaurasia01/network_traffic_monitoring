@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
+const API_URL = import.meta.env.VITE_API_URL;
 function App() {
   const [backendStatus, setBackendStatus] = useState("CHECKING");
 
@@ -16,7 +17,7 @@ function App() {
   });
 
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/health")
+    fetch(`${API_URL}/health`)
       .then((response) => response.json())
       .then((data) => {
         if (data.status === "online") {
@@ -31,7 +32,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/stats")
+    fetch(`${API_URL}/stats`)
       .then((response) => response.json())
       .then((data) => {
         setDashboardStats(data);
@@ -75,14 +76,14 @@ function App() {
 
       // Get a demo traffic sample
       const sampleResponse = await fetch(
-        `http://127.0.0.1:8000/sample/${sampleType}`
+        `${API_URL}/sample/${sampleType}`
       );
 
       const sampleData = await sampleResponse.json();
 
       // Send the 77 features to the ML prediction endpoint
       const predictionResponse = await fetch(
-        "http://127.0.0.1:8000/predict",
+        `${API_URL}/predict`,
         {
           method: "POST",
           headers: {
