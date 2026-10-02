@@ -14,6 +14,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:5173",
         "https://network-traffic-monitoring.vercel.app",
     ],
     allow_credentials=True,
@@ -48,13 +49,7 @@ print("Random Forest model loaded successfully.")
 print(f"Number of expected features: {len(feature_columns)}")
 
 # Allow the React development server to communicate with FastAPI
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
 
 
 @app.get("/")
