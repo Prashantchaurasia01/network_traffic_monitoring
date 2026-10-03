@@ -9,7 +9,14 @@ import joblib
 
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score
+)
 
 def main():
     # Setup paths relative to this script
@@ -92,6 +99,51 @@ def main():
     # 6. Evaluate on the test set
     print("\n6. Evaluating on test set...")
     y_pred = rf.predict(X_test)
+
+    # Calculate exact evaluation metrics
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred)
+    recall = recall_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred)
+
+    cm = confusion_matrix(y_test, y_pred)
+
+    # Top feature importance
+    feature_importance = sorted(
+        zip(feature_cols, rf.feature_importances_),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    top_features = [
+        {
+            "feature": feature,
+            "importance": float(importance)
+        }
+        for feature, importance in feature_importance[:20]
+    ]
+
+    metrics = {
+        "accuracy": float(accuracy),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "confusion_matrix": {
+            "true_negative": int(cm[0][0]),
+            "false_positive": int(cm[0][1]),
+            "false_negative": int(cm[1][0]),
+            "true_positive": int(cm[1][1])
+        },
+        "test_samples": int(len(y_test)),
+        "top_features": top_features
+    }
+
+    metrics_file = os.path.join(models_dir, "metrics.json")
+
+    with open(metrics_file, "w") as f:
+        json.dump(metrics, f, indent=2)
+
+    print(f"Saved model metrics to {metrics_file}")
     
     print("\n--- Classification Report ---")
     # WHY THIS MATTERS FOR ANOMALY DETECTION:

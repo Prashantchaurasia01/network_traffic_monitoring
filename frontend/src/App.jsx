@@ -8,9 +8,11 @@ import ProtocolDistribution from "./components/ProtocolDistribution";
 import DetectionPanel from "./components/DetectionPanel";
 import AlertsTable from "./components/AlertsTable";
 import ModelInfo from "./components/ModelInfo";
+import ConfusionMatrix from "./components/ConfusionMatrix";
+import FeatureImportance from "./components/FeatureImportance";
 
 // Preserve existing backend API URL resolution with resilient local fallback
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+const API_URL = import.meta.env.VITE_API_URL || "https://network-traffic-monitoring-0v26.onrender.com";
 
 export function App() {
   const [backendStatus, setBackendStatus] = useState("CHECKING");
@@ -37,6 +39,19 @@ export function App() {
   const [predictionLoading, setPredictionLoading] = useState(false);
   const [predictionError, setPredictionError] = useState(null);
   const [lastSampleData, setLastSampleData] = useState(null);
+  const [modelMetrics, setModelMetrics] = useState(null);
+
+  // Fetch model metrics
+  const fetchModelMetrics = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/model-metrics`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setModelMetrics(data);
+    } catch (err) {
+      console.warn("Could not load /model-metrics from backend:", err);
+    }
+  }, []);
 
   // Real-time classification event history
   const [liveEvents, setLiveEvents] = useState([]);
@@ -86,7 +101,8 @@ export function App() {
     fetchHealth();
     fetchStats();
     fetchModelInfo();
-  }, [fetchHealth, fetchStats, fetchModelInfo]);
+    fetchModelMetrics();
+  }, [fetchHealth, fetchStats, fetchModelInfo, fetchModelMetrics]);
 
   // Periodic heartbeat poll
   useEffect(() => {
@@ -99,7 +115,7 @@ export function App() {
   // Manual refresh trigger
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await Promise.all([fetchHealth(), fetchStats(), fetchModelInfo()]);
+    await Promise.all([fetchHealth(), fetchStats(), fetchModelInfo(), fetchModelMetrics()]);
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
@@ -168,14 +184,47 @@ export function App() {
     }
   };
 
-  // Derive metric ratios
+  // Derive metric ratios & stats
   const totalFlowsCount = dashboardStats.total_flows || 2520798;
-  const benignRatio = totalFlowsCount > 0 
-    ? ((dashboardStats.benign_flows / totalFlowsCount) * 100).toFixed(1)
-    : "83.1";
-  const anomalyRatio = totalFlowsCount > 0 
-    ? ((dashboardStats.anomaly_flows / totalFlowsCount) * 100).toFixed(1)
-    : "16.9";
+
+  const stats = [
+    {
+      title: "Accuracy",
+      value: modelMetrics
+        ? `${(modelMetrics.accuracy * 100).toFixed(2)}%`
+        : "--",
+      subtitle: "Test-set accuracy",
+      detailBadge: "MODEL",
+      tone: "blue"
+    },
+    {
+      title: "Precision",
+      value: modelMetrics
+        ? `${(modelMetrics.precision * 100).toFixed(2)}%`
+        : "--",
+      subtitle: "Anomaly precision",
+      detailBadge: "PURITY",
+      tone: "green"
+    },
+    {
+      title: "Recall",
+      value: modelMetrics
+        ? `${(modelMetrics.recall * 100).toFixed(2)}%`
+        : "--",
+      subtitle: "Anomaly recall",
+      detailBadge: "COVERAGE",
+      tone: "red"
+    },
+    {
+      title: "F1 Score",
+      value: modelMetrics
+        ? `${(modelMetrics.f1 * 100).toFixed(2)}%`
+        : "--",
+      subtitle: "Anomaly F1 score",
+      detailBadge: "BALANCED",
+      tone: "default"
+    },
+  ];
 
   return (
     <div className="soc-app">
@@ -191,37 +240,16 @@ export function App() {
       <main className="soc-dashboard">
         {/* Section 1: Overview Metrics */}
         <section className="soc-stats-grid" aria-label="Operational Metrics">
-          <StatCard
-            title="Total Evaluated Flows"
-            value={totalFlowsCount.toLocaleString()}
-            subtitle="CICIDS2017 Benchmark Dataset"
-            detailBadge="100% CAPTURE"
-            tone="default"
-          />
-
-          <StatCard
-            title="Benign Baseline"
-            value={dashboardStats.benign_flows.toLocaleString()}
-            subtitle={`${benignRatio}% of total traffic volume`}
-            detailBadge="NORMAL"
-            tone="green"
-          />
-
-          <StatCard
-            title="Intrusion Anomalies"
-            value={dashboardStats.anomaly_flows.toLocaleString()}
-            subtitle={`${anomalyRatio}% malicious attack vectors`}
-            detailBadge="THREATS"
-            tone="red"
-          />
-
-          <StatCard
-            title="Model Validation Rate"
-            value="99.6%"
-            subtitle="Random Forest Test Accuracy"
-            detailBadge="BALANCED"
-            tone="blue"
-          />
+          {stats.map((stat, idx) => (
+            <StatCard
+              key={idx}
+              title={stat.title}
+              value={stat.value}
+              subtitle={stat.subtitle}
+              detailBadge={stat.detailBadge}
+              tone={stat.tone}
+            />
+          ))}
         </section>
 
         {/* Section 2 & 3: Traffic Monitoring & Composition */}
@@ -241,12 +269,77 @@ export function App() {
           />
         </section>
 
+        {modelMetrics && (
+          <section className="model-performance-grid">
+            <div className="performance-panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>Confusion Matrix</h2>
+                  <p>Random Forest test-set classification</p>
+                </div>
+              </div>
+
+              <div className="confusion-matrix">
+                <div className="matrix-corner"></div>
+
+                <div className="matrix-axis">
+                  Predicted Benign
+                </div>
+
+                <div className="matrix-axis">
+                  Predicted Anomaly
+                </div>
+
+                <div className="matrix-axis actual-label">
+                  Actual Benign
+                </div>
+
+                <div className="matrix-cell true-negative">
+                  <strong>
+                    {modelMetrics.confusion_matrix.true_negative.toLocaleString()}
+                  </strong>
+                  <span>True Negative</span>
+                </div>
+
+                <div className="matrix-cell false-positive">
+                  <strong>
+                    {modelMetrics.confusion_matrix.false_positive.toLocaleString()}
+                  </strong>
+                  <span>False Positive</span>
+                </div>
+
+                <div className="matrix-axis actual-label">
+                  Actual Anomaly
+                </div>
+
+                <div className="matrix-cell false-negative">
+                  <strong>
+                    {modelMetrics.confusion_matrix.false_negative.toLocaleString()}
+                  </strong>
+                  <span>False Negative</span>
+                </div>
+
+                <div className="matrix-cell true-positive">
+                  <strong>
+                    {modelMetrics.confusion_matrix.true_positive.toLocaleString()}
+                  </strong>
+                  <span>True Positive</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* Section 5: Security Alerts & Incident Log */}
         <section>
           <AlertsTable liveEvents={liveEvents} />
         </section>
 
         {/* Section 6: Model Architecture & Telemetry */}
+        <section className="soc-main-grid">
+          <ConfusionMatrix metrics={modelMetrics} />
+          <FeatureImportance metrics={modelMetrics} />
+        </section>
         <section>
           <ModelInfo modelInfo={modelInfo} stats={dashboardStats} />
         </section>
