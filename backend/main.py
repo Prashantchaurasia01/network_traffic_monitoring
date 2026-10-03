@@ -38,12 +38,22 @@ FEATURES_PATH = os.path.join(
     "feature_columns.json"
 )
 
+METRICS_PATH = os.path.join(
+    BASE_DIR,
+    "ml",
+    "models",
+    "metrics.json"
+)
+
 print("Loading Random Forest model...")
 
 model = joblib.load(MODEL_PATH)
 
 with open(FEATURES_PATH, "r") as f:
     feature_columns = json.load(f)
+
+with open(METRICS_PATH, "r") as f:
+    model_metrics = json.load(f)
 
 print("Random Forest model loaded successfully.")
 print(f"Number of expected features: {len(feature_columns)}")
@@ -152,3 +162,62 @@ def get_sample(sample_type: str):
         "sample_type": sample_type,
         "features": samples[sample_type]
     }    
+
+
+@app.get("/model-metrics")
+def model_metrics():
+    return {
+        "accuracy": 0.9986353538559187,
+        "precision": 0.9953549476845118,
+        "recall": 0.9965706769389768,
+        "f1": 0.995962441314554,
+        "confusion_matrix": {
+            "true_negative": 418616,
+            "false_positive": 396,
+            "false_negative": 292,
+            "true_positive": 84856
+        },
+        "test_samples": 504160,
+        "top_features": [
+            {
+                "feature": "Bwd Packet Length Std",
+                "importance": 0.07315809351070021
+            },
+            {
+                "feature": "Packet Length Mean",
+                "importance": 0.059589236439711805
+            },
+            {
+                "feature": "Packet Length Variance",
+                "importance": 0.058455200815344284
+            },
+            {
+                "feature": "Average Packet Size",
+                "importance": 0.0567046421076188
+            },
+            {
+                "feature": "Packet Length Std",
+                "importance": 0.047069154909710476
+            },
+            {
+                "feature": "Bwd Packet Length Mean",
+                "importance": 0.042888618318431986
+            },
+            {
+                "feature": "Max Packet Length",
+                "importance": 0.04262245663942492
+            },
+            {
+                "feature": "Bwd Packet Length Max",
+                "importance": 0.0382105615508792
+            },
+            {
+                "feature": "Avg Bwd Segment Size",
+                "importance": 0.03188536765817752
+            },
+            {
+                "feature": "Subflow Bwd Bytes",
+                "importance": 0.030849577613862433
+            }
+        ]
+    }
