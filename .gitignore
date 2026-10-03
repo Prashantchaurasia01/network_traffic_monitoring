@@ -15,3 +15,30 @@ env/
 node_modules/
 dist/
 .DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+
+# Large ML datasets
+data/MachineLearningCSV/
+data/*.csv
+
+# ML generated files
+ml/models/*.joblib
+
+# Python generated files
+*.pkl
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Logs
+*.log
